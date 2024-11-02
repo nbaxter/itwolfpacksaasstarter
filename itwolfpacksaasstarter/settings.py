@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     'django_htmx',
     'tailwind',
     'theme',
+    'django_browser_reload',
 
     # local apps
     'core',
@@ -53,6 +54,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'django_htmx.middleware.HtmxMiddleware',
     'allauth.account.middleware.AccountMiddleware',
+    'django_browser_reload.middleware.BrowserReloadMiddleware',
 ]
 
 ROOT_URLCONF = 'itwolfpacksaasstarter.urls'
