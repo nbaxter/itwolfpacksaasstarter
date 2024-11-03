@@ -1,0 +1,8 @@
+1. Social account feature installed but not turned on.
+    a. Uncomment the SOCIALACCOUNT_PROVIDERS in settings.py
+    b. Add <a href="{% provider_login_url 'google' %}" to the login.html/signup.html template
+    c. Add {% load socialaccount %} to the login.html/signup.html template
+    d. Edit the admin panel to add the social account credentials from the google developer console.
+
+2. 
+

@@ -21,7 +21,7 @@ from django.urls import path, include
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', include('allauth.urls')),  # for django-allauth
-    path('', include('core.urls')),  
+    path('', include('core.urls')), 
     path('accounts/', include('accounts.urls')),  # for custom accounts app
     path('payments/', include('payments.urls')),
 
