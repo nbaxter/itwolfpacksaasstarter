@@ -7,4 +7,5 @@ urlpatterns = [
     path('checkout/', views.checkout, name='checkout'),
     path('create-subscription/', views.create_subscription, name='create_subscription'),
     path('webhook/', views.stripe_webhook, name='stripe_webhook'),
+    path('success/', views.success, name='success'),
 ]

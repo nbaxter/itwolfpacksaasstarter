@@ -5,6 +5,9 @@ from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.shortcuts import render, redirect
+from .models import Subscription
+import json
+from datetime import datetime, timezone
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -18,47 +21,103 @@ def checkout(request):
 @require_POST
 def create_subscription(request):
     try:
-        # Create customer if doesn't exist
-        if not request.user.stripe_customer_id:
+        # Create or get Stripe customer
+        if request.user.stripe_customer_id:
+            customer = stripe.Customer.retrieve(request.user.stripe_customer_id)
+        else:
             customer = stripe.Customer.create(
                 email=request.user.email,
-                source=request.POST['stripeToken']
+                metadata={'user_id': request.user.id}
             )
             request.user.stripe_customer_id = customer.id
             request.user.save()
 
-        # Create subscription
-        subscription = stripe.Subscription.create(
-            customer=request.user.stripe_customer_id,
-            items=[{'price': 'your-price-id'}],  # Replace with your price ID
-            expand=['latest_invoice.payment_intent']
+        # Create Stripe checkout session
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer.id,
+            payment_method_types=['card'],
+            line_items=[{
+                'price': 'price_YOUR_PRICE_ID',  # Replace with your Stripe price ID
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=request.build_absolute_uri('/payments/success/'),
+            cancel_url=request.build_absolute_uri('/payments/checkout/'),
         )
-
-        return JsonResponse({
-            'subscription_id': subscription.id,
-            'client_secret': subscription.latest_invoice.payment_intent.client_secret
-        })
+        
+        return JsonResponse({'id': checkout_session.id})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
 
 @csrf_exempt
 def stripe_webhook(request):
     payload = request.body
-    sig_header = request.META['HTTP_STRIPE_SIGNATURE']
+    sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
 
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
         )
-    except ValueError:
+    except ValueError as e:
         return HttpResponse(status=400)
-    except stripe.error.SignatureVerificationError:
+    except stripe.error.SignatureVerificationError as e:
         return HttpResponse(status=400)
 
-    if event['type'] == 'customer.subscription.updated':
-        subscription = event['data']['object']
-        user = CustomUser.objects.get(stripe_customer_id=subscription.customer)
-        user.subscription_status = subscription.status
-        user.save()
+    if event['type'] == 'customer.subscription.created':
+        handle_subscription_created(event)
+    elif event['type'] == 'customer.subscription.updated':
+        handle_subscription_updated(event)
+    elif event['type'] == 'customer.subscription.deleted':
+        handle_subscription_deleted(event)
 
     return HttpResponse(status=200)
+
+def handle_subscription_created(event):
+    subscription = event['data']['object']
+    user = CustomUser.objects.get(stripe_customer_id=subscription['customer'])
+    
+    # Update user subscription status
+    user.is_subscribed = True
+    user.subscription_status = subscription['status']
+    user.subscription_id = subscription['id']
+    user.save()
+
+    # Create subscription record
+    Subscription.objects.create(
+        user=user,
+        stripe_subscription_id=subscription['id'],
+        status=subscription['status'],
+        current_period_end=datetime.fromtimestamp(subscription['current_period_end'], timezone.utc)
+    )
+
+def handle_subscription_updated(event):
+    subscription = event['data']['object']
+    user = CustomUser.objects.get(stripe_customer_id=subscription['customer'])
+    
+    # Update user subscription status
+    user.subscription_status = subscription['status']
+    user.save()
+
+    # Update subscription record
+    sub = Subscription.objects.get(stripe_subscription_id=subscription['id'])
+    sub.status = subscription['status']
+    sub.current_period_end = datetime.fromtimestamp(subscription['current_period_end'], timezone.utc)
+    sub.save()
+
+def handle_subscription_deleted(event):
+    subscription = event['data']['object']
+    user = CustomUser.objects.get(stripe_customer_id=subscription['customer'])
+    
+    # Update user subscription status
+    user.is_subscribed = False
+    user.subscription_status = 'canceled'
+    user.save()
+
+    # Update subscription record
+    sub = Subscription.objects.get(stripe_subscription_id=subscription['id'])
+    sub.status = 'canceled'
+    sub.save()
+
+@login_required
+def success(request):
+    return render(request, 'payments/success.html')
